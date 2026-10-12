@@ -1,45 +1,44 @@
 # =============================================================================
-# Snowflake へのデプロイ
-#   - main への push（snowflake/ または scripts/ の変更）: DEV -> STG -> PRO の順にデプロイ
-#   - 手動実行: 環境を 1 つ選んでデプロイ
+# Snowflake へのデプロイ（ブランチ = 環境）
+#   dev  ブランチ -> GHA_DEMO_DB.DEV
+#   stg  ブランチ -> GHA_DEMO_DB.STG
+#   main ブランチ -> GHA_DEMO_DB.PRO
+#   - push 時: push したブランチの環境へデプロイ
+#   - 手動実行: 「Use workflow from」で選んだブランチの環境へデプロイ
 #   PRO の前に承認を挟みたい場合は Settings > Environments > pro に Required reviewers を設定
 # =============================================================================
 name: Deploy to Snowflake
 
 on:
   push:
-    branches: [main]
+    branches: [dev, stg, main]
     paths:
       - "snowflake/**"
       - "scripts/**"
       - "requirements.txt"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
-    inputs:
-      env:
-        description: "デプロイ先の環境"
-        type: choice
-        options: [dev, stg, pro]
-        default: dev
 
 concurrency:
-  group: deploy-snowflake
+  group: deploy-snowflake-${{ github.ref_name }}
   cancel-in-progress: false
 
-env:
-  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-  SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-  SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-  SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE || 'GHA_DEMO_DB' }}
-  SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
-  SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
-
 jobs:
-  deploy-dev:
-    if: github.event_name == 'push' || inputs.env == 'dev'
+  deploy:
+    # dev / stg / main 以外のブランチから手動実行された場合は何もしない
+    if: contains(fromJSON('["dev", "stg", "main"]'), github.ref_name)
+    name: deploy (${{ github.ref_name == 'main' && 'pro' || github.ref_name }})
     runs-on: ubuntu-latest
-    environment: dev
+    environment: ${{ github.ref_name == 'main' && 'pro' || github.ref_name }}
+    env:
+      TARGET_ENV: ${{ github.ref_name == 'main' && 'pro' || github.ref_name }}
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE || 'GHA_DEMO_DB' }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -47,37 +46,4 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python scripts/deploy.py dev
-
-  deploy-stg:
-    needs: deploy-dev
-    # push 時は DEV 成功後に実行、手動時は stg 選択時のみ（deploy-dev はスキップされる）
-    if: |
-      always() &&
-      (github.event_name == 'push' && needs.deploy-dev.result == 'success' || inputs.env == 'stg')
-    runs-on: ubuntu-latest
-    environment: stg
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt
-      - run: python scripts/deploy.py stg
-
-  deploy-pro:
-    needs: deploy-stg
-    if: |
-      always() &&
-      (github.event_name == 'push' && needs.deploy-stg.result == 'success' || inputs.env == 'pro')
-    runs-on: ubuntu-latest
-    environment: pro
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt
-      - run: python scripts/deploy.py pro
+      - run: python scripts/deploy.py "$TARGET_ENV"

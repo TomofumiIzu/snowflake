@@ -3,7 +3,8 @@
 #   - 定期実行: 毎日 11:00 (日本時間) に STG と PRO で実行
 #               GitHub の cron は UTC なので 02:00 UTC を指定
 #               ※ GitHub 側の混雑により数分〜十数分遅れることがある
-#   - 手動実行: 環境を選んで実行（dev はこちらでのみ実行）
+#   - 手動実行: 「Use workflow from」で選んだブランチの環境で実行
+#               dev -> DEV / stg -> STG / main -> PRO（dev はこちらでのみ実行）
 #   いずれかのステップが失敗すると後続のプロシージャは実行されない
 # =============================================================================
 name: Run Snowflake Procedures
@@ -12,19 +13,13 @@ on:
   schedule:
     - cron: "0 2 * * *" # 11:00 JST
   workflow_dispatch:
-    inputs:
-      env:
-        description: "実行する環境"
-        type: choice
-        options: [dev, stg, pro]
-        default: dev
 
 jobs:
   run:
     strategy:
       fail-fast: false # STG が失敗しても PRO は実行する
       matrix:
-        env: ${{ github.event_name == 'schedule' && fromJSON('["stg", "pro"]') || fromJSON(format('["{0}"]', inputs.env)) }}
+        env: ${{ github.event_name == 'schedule' && fromJSON('["stg", "pro"]') || fromJSON(format('["{0}"]', github.ref_name == 'main' && 'pro' || github.ref_name)) }}
     name: run (${{ matrix.env }})
     runs-on: ubuntu-latest
     concurrency:

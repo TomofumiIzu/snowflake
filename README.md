@@ -15,9 +15,21 @@ scripts/
   deploy.py                       SQL を環境スキーマへデプロイ（{{DATABASE}} / {{SCHEMA}} を置換）
   call_procedure.py               プロシージャを 1 つ CALL
 .github/workflows/
-  deploy.yml                      main への push で DEV -> STG -> PRO にデプロイ（手動実行も可）
+  deploy.yml                      push したブランチの環境へデプロイ（手動実行も可）
   run_procedures.yml              毎日 11:00 JST に STG / PRO で SP_STEP1 -> 2 -> 3 を実行（手動実行も可）
 ```
+
+## ブランチと環境
+
+| ブランチ | Snowflake スキーマ |
+| --- | --- |
+| `dev`  | `GHA_DEMO_DB.DEV` |
+| `stg`  | `GHA_DEMO_DB.STG` |
+| `main` | `GHA_DEMO_DB.PRO` |
+
+開発の流れ: `dev` で作業して push（DEV にデプロイ）→ `dev` を `stg` にマージ（STG にデプロイ）→ `stg` を `main` にマージ（PRO にデプロイ）
+
+手動実行は Actions 画面の「Run workflow」で、「Use workflow from」に実行したいブランチを選ぶ。
 
 ## GitHub の設定
 
