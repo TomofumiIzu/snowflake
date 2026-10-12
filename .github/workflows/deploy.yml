@@ -1,0 +1,83 @@
+# =============================================================================
+# Snowflake へのデプロイ
+#   - main への push（snowflake/ または scripts/ の変更）: DEV -> STG -> PRO の順にデプロイ
+#   - 手動実行: 環境を 1 つ選んでデプロイ
+#   PRO の前に承認を挟みたい場合は Settings > Environments > pro に Required reviewers を設定
+# =============================================================================
+name: Deploy to Snowflake
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "snowflake/**"
+      - "scripts/**"
+      - "requirements.txt"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "デプロイ先の環境"
+        type: choice
+        options: [dev, stg, pro]
+        default: dev
+
+concurrency:
+  group: deploy-snowflake
+  cancel-in-progress: false
+
+env:
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+  SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+  SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE || 'GHA_DEMO_DB' }}
+  SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+  SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+
+jobs:
+  deploy-dev:
+    if: github.event_name == 'push' || inputs.env == 'dev'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python scripts/deploy.py dev
+
+  deploy-stg:
+    needs: deploy-dev
+    # push 時は DEV 成功後に実行、手動時は stg 選択時のみ（deploy-dev はスキップされる）
+    if: |
+      always() &&
+      (github.event_name == 'push' && needs.deploy-dev.result == 'success' || inputs.env == 'stg')
+    runs-on: ubuntu-latest
+    environment: stg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python scripts/deploy.py stg
+
+  deploy-pro:
+    needs: deploy-stg
+    if: |
+      always() &&
+      (github.event_name == 'push' && needs.deploy-stg.result == 'success' || inputs.env == 'pro')
+    runs-on: ubuntu-latest
+    environment: pro
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python scripts/deploy.py pro

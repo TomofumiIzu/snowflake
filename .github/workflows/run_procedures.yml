@@ -1,0 +1,56 @@
+# =============================================================================
+# プロシージャの順次実行  SP_STEP1 -> SP_STEP2 -> SP_STEP3
+#   - 定期実行: 毎日 11:00 (日本時間) に STG と PRO で実行
+#               GitHub の cron は UTC なので 02:00 UTC を指定
+#               ※ GitHub 側の混雑により数分〜十数分遅れることがある
+#   - 手動実行: 環境を選んで実行（dev はこちらでのみ実行）
+#   いずれかのステップが失敗すると後続のプロシージャは実行されない
+# =============================================================================
+name: Run Snowflake Procedures
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # 11:00 JST
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "実行する環境"
+        type: choice
+        options: [dev, stg, pro]
+        default: dev
+
+jobs:
+  run:
+    strategy:
+      fail-fast: false # STG が失敗しても PRO は実行する
+      matrix:
+        env: ${{ github.event_name == 'schedule' && fromJSON('["stg", "pro"]') || fromJSON(format('["{0}"]', inputs.env)) }}
+    name: run (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    concurrency:
+      group: run-procedures-${{ matrix.env }}
+      cancel-in-progress: false
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE || 'GHA_DEMO_DB' }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+      # 3 つのプロシージャで同じ実行 ID を使い、どの実行で入った行か追えるようにする
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: "Step 1: SP_STEP1"
+        run: python scripts/call_procedure.py ${{ matrix.env }} SP_STEP1 "$RUN_ID"
+      - name: "Step 2: SP_STEP2"
+        run: python scripts/call_procedure.py ${{ matrix.env }} SP_STEP2 "$RUN_ID"
+      - name: "Step 3: SP_STEP3"
+        run: python scripts/call_procedure.py ${{ matrix.env }} SP_STEP3 "$RUN_ID"
