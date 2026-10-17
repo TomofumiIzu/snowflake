@@ -6,6 +6,9 @@
 #   - 手動実行: 「Use workflow from」で選んだブランチの環境で実行
 #               dev -> DEV / stg -> STG / main -> PRO（dev はこちらでのみ実行）
 #   いずれかのステップが失敗すると後続のプロシージャは実行されない
+#   - 途中から再開: 手動実行で「再開するプロシージャ」と失敗した実行の RUN_ID を指定すると、
+#               そのプロシージャから実行する（失敗したジョブのログ「RUN_ID=...」で確認）
+#               ※ Re-run は当時の YML / コードで動くため、修正後はこちらで再実行する
 # =============================================================================
 name: Run Snowflake Procedures
 
@@ -13,6 +16,16 @@ on:
   schedule:
     - cron: "0 2 * * *" # 11:00 JST
   workflow_dispatch:
+    inputs:
+      start_from:
+        description: "再開するプロシージャ（最初から実行する場合は SP_STEP1）"
+        type: choice
+        default: SP_STEP1
+        options: [SP_STEP1, SP_STEP2, SP_STEP3]
+      run_id:
+        description: "再開時のみ: 失敗した実行の RUN_ID（SP_STEP2 / SP_STEP3 から再開する場合は必須）"
+        type: string
+        required: false
 
 jobs:
   run:
@@ -34,7 +47,9 @@ jobs:
       SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
       SNOWFLAKE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
       # 3 つのプロシージャで同じ実行 ID を使い、どの実行で入った行か追えるようにする
-      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      # 途中から再開する場合は、失敗した実行の RUN_ID を引き継ぐ
+      RUN_ID: ${{ inputs.run_id || format('{0}-{1}', github.run_id, github.run_attempt) }}
+      START_FROM: ${{ inputs.start_from || 'SP_STEP1' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -43,9 +58,19 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
 
+      - name: Check inputs
+        run: |
+          echo "RUN_ID=$RUN_ID START_FROM=$START_FROM"
+          if [ "$START_FROM" != "SP_STEP1" ] && [ -z "${{ inputs.run_id }}" ]; then
+            echo "::error::$START_FROM から再開する場合は run_id に失敗した実行の RUN_ID を指定してください"
+            exit 1
+          fi
+
       - name: "Step 1: SP_STEP1"
+        if: env.START_FROM == 'SP_STEP1'
         run: python scripts/call_procedure.py ${{ matrix.env }} SP_STEP1 "$RUN_ID"
       - name: "Step 2: SP_STEP2"
+        if: env.START_FROM != 'SP_STEP3'
         run: python scripts/call_procedure.py ${{ matrix.env }} SP_STEP2 "$RUN_ID"
       - name: "Step 3: SP_STEP3"
         run: python scripts/call_procedure.py ${{ matrix.env }} SP_STEP3 "$RUN_ID"

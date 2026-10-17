@@ -31,6 +31,15 @@ scripts/
 
 手動実行は Actions 画面の「Run workflow」で、「Use workflow from」に実行したいブランチを選ぶ。
 
+### プロシージャが途中で失敗したとき
+
+Re-run は失敗した当時の YML / コードで動くため、修正を push したあとは Run Snowflake Procedures を「Run workflow」で実行し直す。
+
+- `start_from`: 再開するプロシージャ（失敗したもの）
+- `run_id`: 失敗した実行の RUN_ID（ジョブのログ「Check inputs」に `RUN_ID=...` と出ている）
+
+SP_STEP2 は同じ RUN_ID の STEP1_RAW を使うため、途中から再開する場合は `run_id` が必須。
+
 ## GitHub の設定
 
 Settings > Secrets and variables > Actions に以下の Repository secrets を登録する。
